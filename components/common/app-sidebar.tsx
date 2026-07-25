@@ -330,8 +330,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 </DropdownMenu>
               ) : (
                 // Not logged in – show sign‑in button
-                <Button variant="outline" className="w-full" asChild>
-                  <Link href="/login">Sign In</Link>
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  render={<Link href="/login" />}
+                >
+                  Sign In
                 </Button>
               )}
             </SidebarMenuItem>
