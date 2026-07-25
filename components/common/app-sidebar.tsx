@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   House,
   ReceiptText,
@@ -33,28 +33,108 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-  DropdownMenuGroup, // ✅ Added import
+  DropdownMenuGroup,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 
-// --- Demo Data ---
-const user = {
-  name: "Aman",
-  email: "aman@example.com",
-  avatar: "https://i.pravatar.cc/150?img=12",
-};
+// --- Supabase client (client-side) ---
+import { createBrowserClient } from "@supabase/ssr";
 
+// If you want to use a separate file for the hook, you can move this part.
+// For simplicity, we define the hook inside this file.
+function useSupabaseUser() {
+  const [user, setUser] = React.useState<any>(null); // or import User type from supabase
+  const [profile, setProfile] = React.useState<any>(null);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    const supabase = createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    );
+
+    const fetchUser = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.user) {
+        setLoading(false);
+        return;
+      }
+
+      setUser(session.user);
+
+      // Fetch profile from a 'profiles' table (optional)
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("full_name, avatar_url")
+        .eq("id", session.user.id)
+        .single();
+
+      setProfile(profileData);
+      setLoading(false);
+    };
+
+    fetchUser();
+
+    // Listen for auth changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        const { data: profileData } = await supabase
+          .from("profiles")
+          .select("full_name, avatar_url")
+          .eq("id", session.user.id)
+          .single();
+        setProfile(profileData);
+      } else {
+        setProfile(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  return { user, profile, loading };
+}
+
+// --- Navigation items (unchanged) ---
 const navItems = [
   { title: "Home", url: "/", icon: House },
   { title: "Transactions", url: "/transactions", icon: ReceiptText },
   { title: "Profile", url: "/profile", icon: User },
 ];
 
+// --- Main Sidebar Component ---
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const pathname = usePathname();
   const { state } = useSidebar();
+  const router = useRouter();
+  const { user, profile, loading } = useSupabaseUser();
+
+  // Build the user object for display
+  const displayUser = user
+    ? {
+        name: profile?.full_name || user.email?.split("@")[0] || "User",
+        email: user.email || "",
+        avatar:
+          profile?.avatar_url ||
+          `https://i.pravatar.cc/150?img=${Math.floor(Math.random() * 70)}`,
+      }
+    : null;
+
+  const handleSignOut = async () => {
+    const supabase = createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    );
+    await supabase.auth.signOut();
+    router.push("/login"); // or wherever you want to redirect
+  };
 
   return (
     <TooltipProvider>
@@ -132,104 +212,128 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <SidebarFooter className="border-t border-border/40 pt-4">
           <SidebarMenu>
             <SidebarMenuItem>
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <SidebarMenuButton
-                      size="lg"
-                      className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground transition-all duration-200"
-                    >
-                      <Avatar className="size-8 rounded-md ring-2 ring-background">
-                        <AvatarImage src={user.avatar} alt={user.name} />
-                        <AvatarFallback className="rounded-md bg-primary/10 text-primary font-semibold">
-                          AM
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="grid flex-1 text-left text-sm leading-tight">
-                        <span className="truncate font-semibold">
-                          {user.name}
-                        </span>
-                        <span className="truncate text-xs text-muted-foreground">
-                          {user.email}
-                        </span>
-                      </div>
-                      <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" />
-                    </SidebarMenuButton>
-                  }
-                />
-
-                <DropdownMenuContent
-                  className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-lg"
-                  side="top"
-                  align="end"
-                  sideOffset={4}
-                >
-                  {/* ✅ Wrap the label inside a DropdownMenuGroup */}
-                  <DropdownMenuGroup>
-                    <DropdownMenuLabel className="p-0 font-normal">
-                      <div className="flex items-center gap-3 px-2 py-3 text-left text-sm">
-                        <Avatar className="size-9 rounded-md">
-                          <AvatarImage src={user.avatar} alt={user.name} />
+              {loading ? (
+                // Skeleton loading state
+                <div className="flex items-center gap-3 px-2 py-1">
+                  <div className="size-8 rounded-md bg-muted animate-pulse" />
+                  <div className="flex-1 space-y-1">
+                    <div className="h-4 w-24 bg-muted animate-pulse rounded" />
+                    <div className="h-3 w-32 bg-muted animate-pulse rounded" />
+                  </div>
+                </div>
+              ) : displayUser ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <SidebarMenuButton
+                        size="lg"
+                        className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground transition-all duration-200"
+                      >
+                        <Avatar className="size-8 rounded-md ring-2 ring-background">
+                          <AvatarImage
+                            src={displayUser.avatar}
+                            alt={displayUser.name}
+                          />
                           <AvatarFallback className="rounded-md bg-primary/10 text-primary font-semibold">
-                            AM
+                            {displayUser.name.slice(0, 2).toUpperCase()}
                           </AvatarFallback>
                         </Avatar>
                         <div className="grid flex-1 text-left text-sm leading-tight">
                           <span className="truncate font-semibold">
-                            {user.name}
+                            {displayUser.name}
                           </span>
                           <span className="truncate text-xs text-muted-foreground">
-                            {user.email}
+                            {displayUser.email}
                           </span>
                         </div>
-                      </div>
-                    </DropdownMenuLabel>
-                  </DropdownMenuGroup>
-
-                  <DropdownMenuSeparator />
-
-                  <DropdownMenuItem
-                    render={
-                      <Link
-                        href="/profile"
-                        className="flex w-full items-center cursor-pointer"
-                      >
-                        <User className="mr-2 size-4 text-muted-foreground" />
-                        Profile
-                      </Link>
-                    }
-                  />
-                  <DropdownMenuItem
-                    render={
-                      <Link
-                        href="/settings"
-                        className="flex w-full items-center cursor-pointer"
-                      >
-                        <Settings className="mr-2 size-4 text-muted-foreground" />
-                        Settings
-                      </Link>
-                    }
-                  />
-                  <DropdownMenuItem
-                    render={
-                      <Link
-                        href="/help"
-                        className="flex w-full items-center cursor-pointer"
-                      >
-                        <HelpCircle className="mr-2 size-4 text-muted-foreground" />
-                        Help Center
-                      </Link>
+                        <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" />
+                      </SidebarMenuButton>
                     }
                   />
 
-                  <DropdownMenuSeparator />
+                  <DropdownMenuContent
+                    className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-lg"
+                    side="top"
+                    align="end"
+                    sideOffset={4}
+                  >
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel className="p-0 font-normal">
+                        <div className="flex items-center gap-3 px-2 py-3 text-left text-sm">
+                          <Avatar className="size-9 rounded-md">
+                            <AvatarImage
+                              src={displayUser.avatar}
+                              alt={displayUser.name}
+                            />
+                            <AvatarFallback className="rounded-md bg-primary/10 text-primary font-semibold">
+                              {displayUser.name.slice(0, 2).toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="grid flex-1 text-left text-sm leading-tight">
+                            <span className="truncate font-semibold">
+                              {displayUser.name}
+                            </span>
+                            <span className="truncate text-xs text-muted-foreground">
+                              {displayUser.email}
+                            </span>
+                          </div>
+                        </div>
+                      </DropdownMenuLabel>
+                    </DropdownMenuGroup>
 
-                  <DropdownMenuItem className="cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10">
-                    <LogOut className="mr-2 size-4" />
-                    Sign Out
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                    <DropdownMenuSeparator />
+
+                    <DropdownMenuItem
+                      render={
+                        <Link
+                          href="/profile"
+                          className="flex w-full items-center cursor-pointer"
+                        >
+                          <User className="mr-2 size-4 text-muted-foreground" />
+                          Profile
+                        </Link>
+                      }
+                    />
+                    <DropdownMenuItem
+                      render={
+                        <Link
+                          href="/settings"
+                          className="flex w-full items-center cursor-pointer"
+                        >
+                          <Settings className="mr-2 size-4 text-muted-foreground" />
+                          Settings
+                        </Link>
+                      }
+                    />
+                    <DropdownMenuItem
+                      render={
+                        <Link
+                          href="/help"
+                          className="flex w-full items-center cursor-pointer"
+                        >
+                          <HelpCircle className="mr-2 size-4 text-muted-foreground" />
+                          Help Center
+                        </Link>
+                      }
+                    />
+
+                    <DropdownMenuSeparator />
+
+                    <DropdownMenuItem
+                      className="cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10"
+                      onClick={handleSignOut}
+                    >
+                      <LogOut className="mr-2 size-4" />
+                      Sign Out
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                // Not logged in – show sign‑in button
+                <Button variant="outline" className="w-full" asChild>
+                  <Link href="/login">Sign In</Link>
+                </Button>
+              )}
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarFooter>
@@ -238,7 +342,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   );
 }
 
-// ——— Layout wrapper ———
+// --- Layout wrapper (unchanged) ---
 import {
   SidebarProvider,
   SidebarTrigger,
