@@ -22,5 +22,9 @@ export default function AuthCallback() {
     handleCallback();
   }, [router, supabase]);
 
-  return <div>Loading...</div>;
+  return (
+    <div className="flex items-center justify-center h-screen w-full">
+      Loading...
+    </div>
+  );
 }
